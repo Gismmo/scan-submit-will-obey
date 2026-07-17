@@ -1,12 +1,17 @@
 import Link from "next/link"
 import { ArrowLeft, Users, Star, Inbox } from "lucide-react"
-import { fetchTallyData, aggregate, extractDares, type QuestionAggregate } from "@/lib/tally"
+import {
+  fetchTallyData,
+  aggregate,
+  extractDares,
+  buildSubmissionsTable,
+  type QuestionAggregate,
+  type SubmissionsTable as SubmissionsTableData,
+} from "@/lib/tally"
 import { getDaresMap } from "@/lib/db"
-import { QuestionChart } from "@/components/results/question-chart"
 import { DareBoard } from "@/components/results/dare-board"
 import { RefreshButton } from "@/components/results/refresh-button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
+import { Card, CardContent } from "@/components/ui/card"
 
 export const dynamic = "force-dynamic"
 
@@ -34,51 +39,78 @@ function StatCard({
   )
 }
 
-function QuestionCard({ agg }: { agg: QuestionAggregate }) {
-  const isText = agg.kind === "text"
-  const isRating = agg.kind === "rating"
-
+// Compact per-question rating: just the average, no distribution chart.
+function RatingStatCard({ agg }: { agg: QuestionAggregate }) {
   return (
-    <Card className="overflow-hidden">
-      <CardHeader className="gap-2">
-        <div className="flex items-start justify-between gap-4">
-          <CardTitle className="text-pretty text-base font-semibold leading-snug">
-            {agg.title}
-          </CardTitle>
-          <Badge variant="secondary" className="shrink-0 font-normal">
-            {agg.answered} {agg.answered === 1 ? "reply" : "replies"}
-          </Badge>
+    <Card>
+      <CardContent className="flex flex-col gap-1.5 p-4">
+        <p className="text-pretty text-sm font-medium leading-snug text-muted-foreground">
+          {agg.title}
+        </p>
+        <div className="flex items-baseline gap-2">
+          <span className="font-display text-2xl font-bold text-foreground">
+            {agg.average != null ? agg.average.toFixed(1) : "—"}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            avg · {agg.answered} {agg.answered === 1 ? "reply" : "replies"}
+          </span>
         </div>
-        {isRating && agg.average != null && (
-          <div className="flex items-baseline gap-2">
-            <span className="font-display text-3xl font-bold text-foreground">
-              {agg.average.toFixed(1)}
-            </span>
-            <span className="text-sm text-muted-foreground">
-              average · range {agg.min}–{agg.max}
-            </span>
-          </div>
-        )}
-      </CardHeader>
-      <CardContent>
-        {agg.answered === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">No responses yet.</p>
-        ) : isText ? (
-          <ul className="flex max-h-72 flex-col gap-2 overflow-y-auto pr-1">
-            {agg.textAnswers.map((text, i) => (
-              <li
-                key={i}
-                className="rounded-lg border border-border bg-secondary/50 px-3 py-2 text-sm leading-relaxed text-foreground"
-              >
-                {text}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <QuestionChart data={agg.distribution} horizontal={agg.kind === "choice"} />
-        )}
       </CardContent>
     </Card>
+  )
+}
+
+function formatWhen(iso: string | null): string {
+  if (!iso) return "—"
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return "—"
+  return d.toLocaleString(undefined, {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
+// Full raw table: every submission as a row, every question as a column.
+function SubmissionsTable({ table }: { table: SubmissionsTableData }) {
+  return (
+    <div>
+      <h2 className="mb-3 font-display text-xl font-semibold text-foreground">All submissions</h2>
+      <div className="overflow-x-auto rounded-2xl border border-border">
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-border bg-secondary/50 text-left">
+              <th className="whitespace-nowrap px-4 py-3 font-semibold text-foreground">
+                Submitted
+              </th>
+              {table.columns.map((col) => (
+                <th
+                  key={col.id}
+                  className="min-w-40 px-4 py-3 font-semibold text-foreground"
+                >
+                  {col.title}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {table.rows.map((row) => (
+              <tr key={row.id} className="border-b border-border last:border-0">
+                <td className="whitespace-nowrap px-4 py-3 align-top text-muted-foreground">
+                  {formatWhen(row.submittedAt)}
+                </td>
+                {table.columns.map((col) => (
+                  <td key={col.id} className="px-4 py-3 align-top text-foreground">
+                    {row.cells[col.id] || <span className="text-muted-foreground">—</span>}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   )
 }
 
@@ -92,13 +124,37 @@ async function ResultsContent() {
       ? ratingAggs.reduce((s, a) => s + (a.average ?? 0), 0) / ratingAggs.length
       : null
 
+  // Only the dare-suggestion question becomes an interactive board; other
+  // free-text questions (e.g. "What is your name?") aren't likeable dares.
+  const isDareQuestion = (title: string) => /\b(dare|challenge|task)\b/i.test(title)
+
   // Dare suggestions with shared like counts + completion status from the DB.
-  const dareSections = extractDares(data)
+  const dareSections = extractDares(data).filter((s) => isDareQuestion(s.title))
   const dareIds = dareSections.flatMap((s) => s.entries.map((e) => e.id))
   const stateMap = await getDaresMap(dareIds)
 
-  // Charts only cover non-text questions; dares get their own board.
-  const chartAggs = summary.aggregates.filter((a) => a.kind !== "text")
+  // Merge each dare entry with its stored like count / completion status.
+  const dareBoards = dareSections
+    .filter((section) => section.entries.length > 0)
+    .map((section) => ({
+      title: section.title,
+      dares: section.entries.map((entry) => {
+        const state = stateMap.get(entry.id)
+        return {
+          id: entry.id,
+          text: entry.text,
+          submittedAt: entry.submittedAt,
+          likes: state?.likes ?? 0,
+          completed: state?.completed ?? false,
+        }
+      }),
+    }))
+
+  // Compact rating cards for each rating question (no distribution charts).
+  const ratingCards = summary.aggregates.filter((a) => a.kind === "rating")
+
+  // Raw table of every submission with all field values.
+  const submissionsTable = buildSubmissionsTable(data)
 
   if (summary.totalSubmissions === 0) {
     return (
@@ -124,7 +180,13 @@ async function ResultsContent() {
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {dareBoards.map((board) => (
+        <DareBoard key={board.title} title={board.title} dares={board.dares} />
+      ))}
+
+      <hr className="border-border" />
+
+      <div className="grid gap-4 sm:grid-cols-2">
         <StatCard
           icon={<Users className="size-5" aria-hidden="true" />}
           label="Total submissions"
@@ -135,18 +197,17 @@ async function ResultsContent() {
           label="Overall rating"
           value={overallAverage != null ? overallAverage.toFixed(1) : "—"}
         />
-        <StatCard
-          icon={<MessageSquareText className="size-5" aria-hidden="true" />}
-          label="Written replies"
-          value={String(textReplies)}
-        />
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        {summary.aggregates.map((agg) => (
-          <QuestionCard key={agg.id} agg={agg} />
-        ))}
-      </div>
+      {ratingCards.length > 0 && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {ratingCards.map((agg) => (
+            <RatingStatCard key={agg.id} agg={agg} />
+          ))}
+        </div>
+      )}
+
+      <SubmissionsTable table={submissionsTable} />
     </div>
   )
 }

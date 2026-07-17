@@ -26,10 +26,7 @@ export default function HomePage() {
       <section className="mx-auto max-w-5xl px-6 py-12 md:py-16">
         <div className="grid items-start gap-10 lg:grid-cols-[1fr_1.1fr] lg:gap-14">
           <div className="lg:sticky lg:top-16">
-            <span className="inline-flex items-center rounded-full bg-secondary px-3 py-1 text-xs font-semibold uppercase tracking-wide text-secondary-foreground">
-              Live party feedback
-            </span>
-            <h1 className="mt-4 text-balance font-display text-4xl font-bold leading-tight tracking-tight text-foreground md:text-5xl">
+            <h1 className="text-balance font-display text-4xl font-bold leading-tight tracking-tight text-foreground md:text-5xl">
               Scan. Submit.{" "}
               <span className="block text-[52px] leading-none">Will OBEY</span>
             </h1>
@@ -44,6 +41,9 @@ export default function HomePage() {
               Skip to the results
               <ArrowRight className="size-4" aria-hidden="true" />
             </Link>
+            <p className="mt-2 text-sm text-muted-foreground">
+              or VOTE for the next challenge
+            </p>
           </div>
 
           <div className="rounded-2xl border border-border bg-card p-4 shadow-sm md:p-6">
