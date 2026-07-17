@@ -240,6 +240,44 @@ export function extractDares(data: TallyData): DareSection[] {
   return sections
 }
 
+export type SubmissionRow = {
+  id: string
+  submittedAt: string | null
+  cells: Record<string, string>
+}
+
+export type SubmissionsTable = {
+  columns: { id: string; title: string }[]
+  rows: SubmissionRow[]
+}
+
+// Build a flat table: one column per question, one row per submission, with
+// each cell holding that submission's answer for that question (most recent first).
+export function buildSubmissionsTable(data: TallyData): SubmissionsTable {
+  const columns = data.questions.map((q) => ({ id: q.id, title: q.title }))
+  const optionMaps = new Map(
+    data.questions.map((q) => [q.id, new Map(q.options.map((o) => [o.id, o.text]))]),
+  )
+
+  const rows: SubmissionRow[] = data.submissions.map((s) => {
+    const cells: Record<string, string> = {}
+    for (const q of data.questions) {
+      const r = s.responses.find((x) => x.questionId === q.id)
+      const labels = r ? answerToLabels(r.answer, optionMaps.get(q.id) ?? new Map()) : []
+      cells[q.id] = labels.join(", ")
+    }
+    return { id: s.id, submittedAt: s.submittedAt, cells }
+  })
+
+  rows.sort((a, b) => {
+    if (!a.submittedAt) return 1
+    if (!b.submittedAt) return -1
+    return b.submittedAt > a.submittedAt ? 1 : b.submittedAt < a.submittedAt ? -1 : 0
+  })
+
+  return { columns, rows }
+}
+
 export function aggregate(data: TallyData): ResultsSummary {
   const { questions, submissions } = data
 

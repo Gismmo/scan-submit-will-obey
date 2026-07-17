@@ -138,10 +138,11 @@ function DareRow({ dare }: { dare: DareItem }) {
 }
 
 export function DareBoard({ title, dares }: { title: string; dares: DareItem[] }) {
-  // Most-liked first, then completed sink to the bottom.
+  // Ordered by most votes first; ties fall back to not-yet-completed first.
   const sorted = [...dares].sort((a, b) => {
+    if (b.likes !== a.likes) return b.likes - a.likes
     if (a.completed !== b.completed) return a.completed ? 1 : -1
-    return b.likes - a.likes
+    return 0
   })
 
   return (
